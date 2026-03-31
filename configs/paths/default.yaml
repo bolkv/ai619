@@ -1,0 +1,5 @@
+data_dir: ./data
+bundle_dir: ./bundles
+output_dir: ./results/${tool.name}/${now:%Y-%m-%d_%H-%M-%S}
+cxr_image_path: ${paths.data_dir}/cxr_samples/MCUCXR_0001_0.png
+msd_data_dir: ${paths.data_dir}/msd

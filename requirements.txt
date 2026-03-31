@@ -1,0 +1,12 @@
+monai==1.5.2
+torchxrayvision
+nibabel==5.4.2
+hydra-core==1.3.2
+omegaconf==2.3.0
+scikit-image==0.26.0
+matplotlib==3.10.8
+numpy==2.4.3
+huggingface_hub==1.8.0
+scikit-learn==1.5.1
+pydicom==3.0.2
+scipy==1.17.1

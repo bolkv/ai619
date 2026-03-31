@@ -1,0 +1,19 @@
+# Data & model weights (large files)
+bundles/
+data/
+
+# Outputs
+results/
+outputs/
+hydra_outputs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+
+# IDE
+.vscode/
+.idea/

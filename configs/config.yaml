@@ -1,0 +1,14 @@
+defaults:
+  - tool: cxr_lung_seg
+  - device: gpu
+  - paths: default
+  - _self_
+
+seed: 42
+save_output: true
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: ./hydra_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
