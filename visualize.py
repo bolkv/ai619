@@ -177,6 +177,17 @@ def visualize_3d(
     # ------------------------------------------------------------------
     is_multichannel = pred_data.ndim == 4
 
+    # Auto-pick the axial slice with the most foreground so small organs
+    # (e.g. spleen) don't land on an empty central slice.
+    if slice_idx is None:
+        if is_multichannel:
+            # pred_data: (H, W, D, C) -> sum foreground over H, W, C per slice
+            fg_per_slice = (pred_data > 0).sum(axis=(0, 1, 3))
+        else:
+            fg_per_slice = (pred_data > 0).sum(axis=(0, 1))
+        if fg_per_slice.max() > 0:
+            slice_idx = int(fg_per_slice.argmax())
+
     if is_multichannel:
         _visualize_3d_multichannel(
             pred_data, orig_data, gt_data_raw,
@@ -352,16 +363,19 @@ def _visualize_3d_labelmap(
     has_orig = orig_data is not None
     has_gt = gt_data_raw is not None
 
-    # Color map for labels
-    label_colors = [[0, 0, 0], [0, 1, 0], [1, 0, 0], [0, 0, 1], [1, 1, 0]]
+    # Build a label->RGB colormap that scales to arbitrary class counts.
+    # Label 0 (background) is always transparent/black; foreground labels
+    # cycle through matplotlib's tab20 palette.
+    _tab20 = plt.get_cmap("tab20").colors  # 20 distinct RGB tuples
 
     def _label_to_rgb(label_slice: np.ndarray) -> np.ndarray:
         rgb = np.zeros((*label_slice.shape, 3))
         max_lbl = int(label_slice.max())
-        for lbl in range(min(max_lbl + 1, len(label_colors))):
+        for lbl in range(1, max_lbl + 1):
+            color = _tab20[(lbl - 1) % len(_tab20)]
             mask = label_slice == lbl
             for c in range(3):
-                rgb[:, :, c] += mask * label_colors[lbl][c]
+                rgb[:, :, c] += mask * color[c]
         return np.clip(rgb, 0, 1)
 
     if has_gt:

@@ -1,0 +1,21 @@
+{
+  "name": "medseg_harness",
+  "team": "team_name",
+  "description": "Unified medical-image segmentation harness wrapping MONAI bundles (spleen, brain tumor, pancreas), torchxrayvision (CXR lung), and nnU-Net v2 (AMOS CT). Accepts a NIfTI or CXR image path and returns per-case segmentation masks.",
+  "entrypoint": "plugins.medseg_harness.logic:execute",
+  "task": "image_segmentation",
+  "task_type": "analysis-task",
+  "modality": "image",
+  "approval_required": true,
+  "source": "plugin",
+  "source_types": ["nifti", "image"],
+  "orchestration": {
+    "consumes": ["nifti_file", "image_file"],
+    "produces": ["segmentation_result"],
+    "priority": 80
+  },
+  "routing": {
+    "trigger_keywords": ["segmentation", "segment", "spleen", "brain tumor", "pancreas", "lung", "amos"],
+    "result_slot": "segmentation_result"
+  }
+}

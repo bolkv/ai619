@@ -1,211 +1,226 @@
-# test_segmentation
+# Medical Segmentation Harness
 
-ChatClinic 프로젝트용 3개 medical image segmentation 모델의 테스트 환경.
+A Hydra-based medical image segmentation harness that wraps MONAI bundles, nnU-Net v2, and torchxrayvision under a single dict-in / dict-out plugin interface. Designed to plug into [chatclinic-multimodal](../chatclinic-multimodal) as `medseg_harness` but also usable standalone (CLI or Python).
 
-| 모델 | 모달리티 | 아키텍처 | 데이터셋 |
-|------|---------|---------|---------|
-| CXR Lung Seg | 2D CXR (PNG/JPG) | PSPNet (TorchXRayVision) | Montgomery County CXR |
-| Brain Tumor Seg | 3D MRI (4채널) | SegResNet (MONAI Bundle) | MSD Task01 BrainTumour |
-| Pancreas Tumor Seg | 3D CT | DiNTS (MONAI Bundle) | MSD Task07 Pancreas |
+## Supported Tools
 
-## 1. 환경 설정 (Anaconda)
+| Tool (`tool_name`) | Framework | Input | Dataset | Model |
+|---|---|---|---|---|
+| `spleen_seg` | MONAI Bundle | 3D CT | MSD Task09_Spleen | `spleen_ct_segmentation` (UNet) |
+| `brain_tumor_seg` | MONAI Bundle | 3D MRI (4ch) | MSD Task01_BrainTumour | `brats_mri_segmentation` (SegResNet) |
+| `pancreas_tumor_seg` | MONAI Bundle | 3D CT | MSD Task07_Pancreas | `pancreas_ct_dints_segmentation` (DiNTS) |
+| `cxr_lung_seg` | torchxrayvision | 2D CXR | Montgomery CXR | `chestx_det` (PSPNet) |
+| `nnunet_amos` | nnU-Net v2 | 3D CT | AMOS 2022 (CT) | `Dataset052_AMOS22_OnlyCT` / MaskSAM |
 
-```bash
-# 가상환경 생성
-conda create -n AI619 python=3.11 -y
-conda activate AI619
+Each tool iterates over **all cases** in its dataset directory, or can be pointed at a single file via the payload.
 
-# PyTorch 설치 (CUDA 12.4)
-pip install torch==2.4.0+cu124 torchvision==0.19.0+cu124 --index-url https://download.pytorch.org/whl/cu124
+## Directory Layout
 
-# 나머지 의존성
-pip install -r requirements.txt
 ```
-- monai 설치 시 PyTorch가 다른 버전으로 덮어씌워질 수 있습니다. 설치 후 PyTorch를 다시 설치하세요.
+.
+├── logic.py                # Plugin entrypoint: execute(payload) -> dict
+├── run.py                  # Thin CLI wrapper (--input, --output JSON)
+├── tool.json               # Plugin manifest (chatclinic format)
+├── visualize.py            # 2D/3D visualization (auto-picks best slice)
+├── setup_bundles.py        # Download MONAI bundles + MSD datasets + CXR samples
+├── download_spleen.py      # Spleen-only dataset download
+├── Dockerfile
+├── requirements.txt
+├── configs/
+│   ├── config.yaml         # Hydra defaults (tool, device, paths, seed)
+│   ├── tool/*.yaml         # Per-tool settings
+│   ├── paths/default.yaml  # datasets_dir, weights_dir, output_dir, ...
+│   └── device/{gpu,cpu}.yaml
+├── tools/
+│   ├── spleen_seg/infer.py
+│   ├── brain_tumor_seg/infer.py
+│   ├── pancreas_tumor_seg/infer.py
+│   ├── cxr_lung_seg/infer.py
+│   └── nnunet_amos/
+│       ├── infer.py
+│       └── vendor/nnunetv2/   # vendored nnU-Net v2
+├── weights/                # bundles/, nnunet/, sam/
+├── datasets/               # msd/, cxr_samples/, nnunet_raw/
+└── results/<tool>/<timestamp>/
+```
 
-## 2. 데이터셋 및 모델 다운로드
+## Plugin Interface
+
+`logic.execute(payload: dict) -> dict` is the single entrypoint. Payload fields:
+
+| Key | Type | Notes |
+|---|---|---|
+| `nifti_path` | str | Path to a 3D NIfTI volume (`.nii` / `.nii.gz`). |
+| `image_path` | str | Path to a 2D CXR image (`.png` / `.jpg`). |
+| `dicom_path` | str | Reserved (DICOM not supported yet). |
+| `tool_name` | str | One of the tools above. If omitted, inferred from the file extension. |
+| `file_name` | str | Optional display name. |
+| `device` | str | `"gpu"` (default) or `"cpu"`. |
+| `output_dir` | str | Override for segmentation output directory. |
+| `overrides` | list[str] | Extra Hydra-style overrides, e.g. `["tool.sw_batch_size=2"]`. |
+
+Return shape:
+
+```json
+{
+  "tool": "medseg_harness",
+  "summary": "Spleen CT Segmentation: segmented 1 sample(s) from 'spleen_2.nii.gz' in 12.3s.",
+  "analysis": {
+    "file_name": "spleen_2.nii.gz",
+    "segmentation_tool": "spleen_seg",
+    "display_name": "Spleen CT Segmentation",
+    "num_classes": 2,
+    "num_samples": 1,
+    "elapsed_sec": 12.34,
+    "targets": ["Background", "Spleen"]
+  },
+  "artifacts": {
+    "mask_path": ".../spleen_2_spleen_seg.nii.gz",
+    "mask_paths": ["..."],
+    "image_path": ".../spleen_2_preproc.nii.gz",
+    "visualization_path": ".../visualization.png"
+  },
+  "warnings": [],
+  "provenance": { "tool_version": "0.1.0", "received_keys": [...], "segmentation_tool": "spleen_seg" }
+}
+```
+
+## Quickstart (Docker)
+
+### 1. Build
 
 ```bash
-conda activate AI619
+docker build -t ai619 .
+```
 
-# 전체 다운로드 (MONAI 번들 + MSD 데이터셋 + CXR 샘플)
+### 2. Run the container
+
+Expose ports for chatclinic integration and mount the repo:
+
+```bash
+docker run \
+--gpus '"device=3"' \
+-it \
+--ipc=host \
+-v $(pwd):/workspace \
+--shm-size=32g \
+-p 8888:8888 \
+--name medseg \
+ai619
+```
+
+Drop `--gpus all` on CPU-only hosts and pass `device=cpu` in payloads.
+
+### 3. Prepare data and weights
+
+```bash
+# Everything
 python setup_bundles.py
 
-# 개별 다운로드
-python setup_bundles.py --bundles-only      # MONAI 번들(모델 가중치)만
-python setup_bundles.py --datasets-only     # MSD 데이터셋만 (Brain Tumor, Pancreas)
-python setup_bundles.py --cxr-only          # CXR 샘플 이미지만
+# Or partial
+python setup_bundles.py --bundles-only   # MONAI bundles only
+python setup_bundles.py --datasets-only  # MSD Tasks 01/07/09 only
+python setup_bundles.py --cxr-only       # 10 CXR samples only
+python download_spleen.py                # Spleen only (~1.5 GB)
 ```
 
-다운로드 후 디렉토리 구조:
+`nnunet_amos` requires manual setup:
 
+- **SAM checkpoint**: `weights/sam/sam_vit_h_4b8939.pth`
+- **Trained model**: `weights/nnunet/Dataset052_AMOS22_OnlyCT/MaskSAM_AMOS__nnUNetPlans__3d_fullres/fold_2/checkpoint_final.pth`
+- **Input volumes**: `datasets/nnunet_raw/Dataset052_AMOS22_OnlyCT/imagesTs/*_0000.nii.gz`
+
+## Usage
+
+### A) Python (direct)
+
+```python
+from logic import execute
+
+result = execute({
+    "nifti_path": "/workspace/datasets/msd/Task09_Spleen/imagesTr/spleen_2.nii.gz",
+    "tool_name": "spleen_seg",
+})
+print(result["artifacts"]["mask_path"])
+print(result["artifacts"]["visualization_path"])
 ```
-test_segmentation/
-├── bundles/                          # MONAI 번들 (모델 가중치 + config)
-│   ├── brats_mri_segmentation/
-│   └── pancreas_ct_dints_segmentation/
-└── data/
-    ├── msd/                          # MSD 데이터셋
-    │   ├── Task01_BrainTumour/
-    │   └── Task07_Pancreas/
-    └── cxr_samples/                  # CXR 테스트 이미지 (PNG)
-```
 
-> MSD 데이터셋은 수GB 크기이므로 다운로드에 시간이 걸릴 수 있습니다.
-
-## 3. 모델 실행
-
-모든 실행은 `run.py`를 통해 Hydra config으로 제어합니다.
-
-### CXR Lung Segmentation
-
-2D 흉부 X-ray에서 폐 영역을 세그멘테이션합니다.
+One-liner:
 
 ```bash
-# CPU 실행 (기본)
-python run.py tool=cxr_lung_seg device=cpu
-
-# GPU 실행
-python run.py tool=cxr_lung_seg device=gpu
+python -c "from logic import execute; import json; print(json.dumps(execute({'nifti_path':'/workspace/datasets/msd/Task09_Spleen/imagesTr/spleen_2.nii.gz','tool_name':'spleen_seg'}), indent=2, default=str))"
 ```
 
-### Brain Tumor Segmentation
-
-3D MRI (4채널: T1, T1ce, T2, FLAIR)에서 뇌종양을 세그멘테이션합니다.
+### B) CLI (file-based)
 
 ```bash
-# GPU 실행 (권장)
-python run.py tool=brain_tumor_seg device=gpu
+cat > /tmp/payload.json <<'EOF'
+{
+  "nifti_path": "/workspace/datasets/nnunet_raw/Dataset052_AMOS22_OnlyCT/imagesTs/amos0005_0000.nii.gz",
+  "tool_name": "nnunet_amos"
+}
+EOF
 
-# CPU 실행 (느림)
-python run.py tool=brain_tumor_seg device=cpu
+python run.py --input /tmp/payload.json --output /tmp/result.json
+cat /tmp/result.json
 ```
 
-### Pancreas Tumor Segmentation
+### C) Through chatclinic-multimodal
 
-3D CT에서 췌장 및 종양을 세그멘테이션합니다.
+Place a shim plugin at `chatclinic-multimodal/plugins/medseg_harness/` that re-exports `execute` from this repo (already set up — see `plugins/medseg_harness/logic.py` in that repo). Then any of:
+
+1. **Generic tool endpoint** (works out of the box):
+   ```bash
+   curl -X POST http://127.0.0.1:8001/api/v1/tools/medseg_harness/run \
+     -H "Content-Type: application/json" \
+     -d '{"payload":{"nifti_path":"/path/to.nii.gz","tool_name":"spleen_seg"}}'
+   ```
+
+2. **Chat `@command`** requires adding an executor entry to `DIRECT_TOOL_ENDPOINT_EXECUTORS` under `"nifti"` in `app/services/chat.py` — not included by default.
+
+## Config Overrides
+
+Anything in `configs/` can be overridden through the payload's `overrides` list (Hydra syntax):
+
+```python
+execute({
+    "nifti_path": "...",
+    "tool_name": "spleen_seg",
+    "overrides": [
+        "tool.sw_batch_size=2",
+        "tool.overlap=0.25",
+        "save_output=false",
+    ],
+})
+```
+
+Key paths (`configs/paths/default.yaml`):
+
+| Key | Default |
+|---|---|
+| `paths.datasets_dir` | `./datasets` (absolute-resolved by logic.py) |
+| `paths.weights_dir` | `./weights` (absolute-resolved by logic.py) |
+| `paths.bundle_dir` | `${paths.weights_dir}/bundles` |
+| `paths.msd_data_dir` | `${paths.datasets_dir}/msd` |
+| `paths.nnunet_raw` | `${paths.datasets_dir}/nnunet_raw` |
+| `paths.nnunet_results` | `${paths.weights_dir}/nnunet` |
+| `paths.sam_checkpoint` | `${paths.weights_dir}/sam/sam_vit_h_4b8939.pth` |
+| `paths.output_dir` | `./results/${tool.name}/${now:...}` |
+
+`logic.py` rewrites `paths.datasets_dir` and `paths.weights_dir` to absolute paths at runtime so the plugin works regardless of the caller's cwd.
+
+## Visualization
+
+- 2D tools (`cxr_lung_seg`) → `visualize_2d` overlays mask on the CXR.
+- 3D tools → `visualize_3d` picks the **axial slice with the most foreground voxels** automatically (so small organs like the spleen don't land on an empty central slice).
+- `_label_to_rgb` uses matplotlib's `tab20` palette, so N-class label maps (e.g. 16-class AMOS) are rendered with distinct colors.
+- Disable visualization by passing `"overrides": ["save_output=false"]` in the payload.
+
+## Without Docker (local Python)
 
 ```bash
-# GPU 실행 (권장, GPU에서도 1-2분 소요)
-python run.py tool=pancreas_tumor_seg device=gpu
-
-# CPU 실행 (매우 느림)
-python run.py tool=pancreas_tumor_seg device=cpu
-```
-
-### 입력 데이터 선택
-
-기본적으로 MSD 데이터셋의 **정렬 기준 첫 번째 파일**을 자동으로 사용합니다.
-특정 샘플을 지정하려면 `paths.input_image`를 override하세요:
-
-```bash
-# Brain Tumor: 특정 MRI 볼륨 지정
-python run.py tool=brain_tumor_seg paths.input_image=./data/msd/Task01_BrainTumour/imagesTr/BRATS_003.nii.gz
-
-# Pancreas: 특정 CT 볼륨 지정
-python run.py tool=pancreas_tumor_seg paths.input_image=./data/msd/Task07_Pancreas/imagesTr/pancreas_042.nii.gz
-
-# CXR: 특정 X-ray 이미지 지정
-python run.py tool=cxr_lung_seg paths.cxr_image_path=./data/cxr_samples/my_xray.png
-```
-
-### Hydra config override 예시
-
-```bash
-python run.py tool=brain_tumor_seg tool.roi_size=[128,128,128]
-python run.py tool=cxr_lung_seg paths.output_dir=./my_outputs
-```
-
-## 4. 출력
-
-결과는 `outputs/{tool_name}/{timestamp}/`에 저장됩니다:
-
-| 모델 | 출력 파일 |
-|------|----------|
-| CXR Lung Seg | `lung_mask.png` + `visualization.png` |
-| Brain Tumor Seg | `brain_tumor_seg.nii.gz` + `visualization.png` |
-| Pancreas Tumor Seg | `*_pancreas_seg.nii.gz` + `visualization.png` |
-
-## 프로젝트 구조
-
-```
-test_segmentation/
-├── configs/
-│   ├── config.yaml              # Hydra 기본 config
-│   ├── tool/                    # 모델별 config
-│   ├── device/                  # gpu.yaml / cpu.yaml
-│   └── paths/                   # 경로 설정
-├── tools/
-│   ├── cxr_lung_seg/infer.py    # TorchXRayVision PSPNet
-│   ├── brain_tumor_seg/infer.py # MONAI SegResNet
-│   └── pancreas_tumor_seg/infer.py # MONAI DiNTS
-├── run.py                       # 통합 실행 진입점
-├── setup_bundles.py             # 번들/데이터 다운로드
-├── visualize.py                 # 결과 시각화
-└── requirements.txt
-```
-
-## 주의사항
-
-- BraTS 라벨: 0, 1, 2, 4 (라벨 3 없음). ET=label4, TC=label1+4, WT=label1+2+4
-- Pancreas DiNTS는 GPU에서도 1-2분 소요
-- MONAI 번들 다운로드 시 수백MB~수GB 네트워크 전송 필요
-
----
-
-## 부록: 알아두면 좋은 용어와 파일 형식
-
-### 파일 확장자
-
-| 확장자 | 이름 | 설명 |
-|--------|------|------|
-| `.nii` / `.nii.gz` | **NIfTI** (Neuroimaging Informatics Technology Initiative) | 3D 의료 영상 표준 포맷. CT/MRI 볼륨 데이터를 저장한다. `.gz`는 gzip 압축 버전으로, 용량이 크기 때문에 거의 항상 압축 형태로 사용한다. Python에서는 `nibabel` 라이브러리로 읽는다. |
-| `.dcm` | **DICOM** (Digital Imaging and Communications in Medicine) | 병원 장비(CT, MRI, X-ray 등)에서 직접 출력하는 원본 포맷. 환자 정보 + 이미지가 함께 들어있다. 한 환자의 CT 촬영이 수백 개의 `.dcm` 슬라이스로 구성되기도 한다. |
-| `.png` / `.jpg` | 일반 이미지 | 2D 의료 영상(CXR, 병리, 안저 사진 등)에서 사용. DICOM에서 변환하거나, 공개 데이터셋에서 바로 제공되기도 한다. |
-| `.npy` | NumPy 배열 | Python NumPy 배열을 그대로 저장한 파일. 중간 결과나 예측값을 빠르게 저장/로드할 때 사용한다. |
-| `.pt` | PyTorch 모델 가중치 | 학습된 모델의 파라미터(가중치)를 저장한 파일. `torch.load()`로 불러온다. |
-
-### 의료 영상 기본 개념
-
-| 용어 | 설명 |
-|------|------|
-| **볼륨 (Volume)** | 3D 이미지 데이터. CT/MRI는 2D 슬라이스를 쌓아 3D 볼륨을 구성한다. shape 예시: `(512, 512, 128)` = 가로 512 x 세로 512 x 깊이 128. |
-| **복셀 (Voxel)** | 3D 이미지의 최소 단위. 2D의 픽셀(pixel)에 해당하는 3D 버전이다. |
-| **Affine 행렬** | NIfTI에 포함된 4x4 변환 행렬. 복셀 좌표 (i, j, k)를 실제 물리적 위치 (mm 단위)로 변환한다. 이게 있어야 영상이 올바른 방향과 스케일로 표시된다. |
-| **Spacing / pixdim** | 복셀 간 실제 거리 (mm). 예: `[1.0, 1.0, 1.0]`이면 각 복셀이 1mm 간격. CT/MRI마다 다르므로 전처리 시 통일해준다. |
-| **Axial / Sagittal / Coronal** | 3D 볼륨을 자르는 3가지 방향. Axial = 위에서 아래로 (가장 흔한 뷰), Sagittal = 옆에서, Coronal = 앞에서. |
-| **ROI (Region of Interest)** | 관심 영역. Sliding Window Inference에서 `roi_size`는 한 번에 모델에 입력하는 3D 패치 크기이다. |
-| **Sliding Window Inference** | 3D 볼륨이 GPU 메모리에 한번에 안 들어갈 때, ROI 크기의 패치를 겹치며 이동하면서 추론하고 결과를 합치는 기법. `overlap`은 패치 간 겹침 비율이다. |
-
-### 세그멘테이션 관련 용어
-
-| 용어 | 설명 |
-|------|------|
-| **세그멘테이션 마스크** | 입력 이미지와 같은 크기의 출력. 각 픽셀/복셀에 클래스 번호(0, 1, 2, ...)가 할당된다. |
-| **다채널 마스크 vs 라벨맵** | Brain Tumor는 3채널 이진 마스크 (ET/TC/WT 각각 0 or 1), Pancreas는 단일 라벨맵 (값이 0/1/2). 두 방식 모두 자주 쓰인다. |
-| **Dice Score** | 세그멘테이션 성능 지표. 예측 마스크와 정답 마스크의 겹침 정도. 1.0이면 완벽 일치, 0이면 전혀 안 겹침. |
-| **MSD (Medical Segmentation Decathlon)** | 10개 의료 세그멘테이션 태스크를 모은 공개 벤치마크 데이터셋. Task01=뇌종양, Task07=췌장 등. |
-
-### BraTS 데이터 구조 (Brain Tumor)
-
-```
-Task01_BrainTumour/
-├── imagesTr/          # 학습용 이미지 (4D NIfTI: T1, T1ce, T2, FLAIR 4채널)
-├── labelsTr/          # 학습용 라벨 (3D NIfTI: 값 0/1/2/4)
-└── dataset.json       # 데이터셋 메타정보
-```
-
-4개 MRI 모달리티:
-- **T1**: 기본 구조 영상
-- **T1ce**: 조영제 주입 후 촬영. 종양 경계가 밝게 보임
-- **T2**: 수분(부종)이 밝게 보임
-- **FLAIR**: T2와 비슷하지만 뇌척수액 신호를 억제
-
-### Pancreas 데이터 구조
-
-```
-Task07_Pancreas/
-├── imagesTr/          # 학습용 CT (3D NIfTI, 단일 채널)
-├── labelsTr/          # 학습용 라벨 (0=배경, 1=췌장, 2=종양)
-└── dataset.json
+python -m venv .venv && source .venv/bin/activate
+pip install torch==2.1.2 torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cu121
+pip install -r requirements.txt
+pip install -e tools/nnunet_amos/vendor  # only if using nnunet_amos
 ```

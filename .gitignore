@@ -1,6 +1,6 @@
 # Data & model weights (large files)
-bundles/
-data/
+datasets/
+weights/
 
 # Outputs
 results/

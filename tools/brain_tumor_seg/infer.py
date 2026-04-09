@@ -16,7 +16,6 @@ import time
 import logging
 
 import torch
-torch.backends.cudnn.enabled = False  # Avoid CUDNN_STATUS_NOT_INITIALIZED on WSL2
 import numpy as np
 import nibabel as nib
 from omegaconf import DictConfig
@@ -34,8 +33,8 @@ from monai.transforms import (
 log = logging.getLogger(__name__)
 
 
-def _find_sample_data(msd_data_dir: str, dataset_task: str) -> dict:
-    """Locate a sample BraTS NIfTI volume and its label.
+def _find_sample_data(msd_data_dir: str, dataset_task: str) -> list:
+    """Locate all BraTS subjects and return a list of sample dicts.
 
     Handles two common layouts:
     1. Single 4-D file per subject  (e.g., BRATS_001.nii.gz)
@@ -43,18 +42,18 @@ def _find_sample_data(msd_data_dir: str, dataset_task: str) -> dict:
 
     Returns
     -------
-    dict
-        {"image": str or list[str], "label": str, "multi_file": bool}
+    list of dict
+        [{"image": str or list[str], "label": str, "multi_file": bool}, ...]
     """
-    images_dir = os.path.join(msd_data_dir, dataset_task, "imagesTr")
-    labels_dir = os.path.join(msd_data_dir, dataset_task, "labelsTr")
+    images_dir = os.path.join(msd_data_dir, dataset_task, "images")
+    labels_dir = os.path.join(msd_data_dir, dataset_task, "labels")
 
     if not os.path.isdir(images_dir):
         raise FileNotFoundError(
             f"Image directory not found: {images_dir}\n"
             "Please download the MSD BraTS dataset first.\n"
             "  python setup_bundles.py          (to download bundle + data)\n"
-            "  Expected layout: {msd_data_dir}/{dataset_task}/imagesTr/"
+            "  Expected layout: {msd_data_dir}/{dataset_task}/images/"
         )
 
     nifti_files = sorted(
@@ -67,45 +66,50 @@ def _find_sample_data(msd_data_dir: str, dataset_task: str) -> dict:
             "Please verify the MSD BraTS data was downloaded correctly."
         )
 
-    # Check whether files are per-modality (contain _t1, _t1ce, _t2, _flair suffixes)
     modality_suffixes = ["_t1.", "_t1ce.", "_t2.", "_flair."]
-    first_file = nifti_files[0]
-    base = os.path.basename(first_file).lower()
+    first_base = os.path.basename(nifti_files[0]).lower()
+    is_multi_file = any(sfx in first_base for sfx in modality_suffixes)
 
-    is_multi_file = any(sfx in base for sfx in modality_suffixes)
-
+    samples = []
     if is_multi_file:
-        # Group by subject prefix (everything before _t1 / _t1ce / _t2 / _flair)
-        subject_prefix = None
-        for sfx in modality_suffixes:
-            idx = base.find(sfx)
-            if idx != -1:
-                subject_prefix = os.path.basename(first_file)[:idx]
-                break
+        # Group files by subject prefix
+        seen_prefixes = set()
+        for f in nifti_files:
+            base = os.path.basename(f)
+            base_lower = base.lower()
+            prefix = None
+            for sfx in modality_suffixes:
+                idx = base_lower.find(sfx)
+                if idx != -1:
+                    prefix = base[:idx]
+                    break
+            if prefix is None or prefix in seen_prefixes:
+                continue
+            seen_prefixes.add(prefix)
 
-        modality_order = ["_t1.", "_t1ce.", "_t2.", "_flair."]
-        modality_paths = []
-        for mod in modality_order:
-            pattern = os.path.join(images_dir, f"{subject_prefix}{mod}*")
-            matches = glob.glob(pattern)
-            # Case-insensitive fallback
-            if not matches:
-                pattern_lower = os.path.join(images_dir, f"{subject_prefix.lower()}{mod}*")
-                matches = glob.glob(pattern_lower)
-            if not matches:
-                raise FileNotFoundError(
-                    f"Could not find modality file matching '{subject_prefix}{mod}*' "
-                    f"in {images_dir}"
-                )
-            modality_paths.append(matches[0])
+            modality_paths = []
+            ok = True
+            for mod in modality_suffixes:
+                matches = glob.glob(os.path.join(images_dir, f"{prefix}{mod}*"))
+                if not matches:
+                    matches = glob.glob(os.path.join(images_dir, f"{prefix.lower()}{mod}*"))
+                if not matches:
+                    log.warning("Subject %s missing modality %s — skipping.", prefix, mod)
+                    ok = False
+                    break
+                modality_paths.append(sorted(matches)[0])
+            if not ok:
+                continue
 
-        label_path = _find_label(labels_dir, subject_prefix)
-        return {"image": modality_paths, "label": label_path, "multi_file": True}
+            label_path = _find_label(labels_dir, prefix)
+            samples.append({"image": modality_paths, "label": label_path, "multi_file": True})
+    else:
+        for f in nifti_files:
+            subject_id = os.path.splitext(os.path.splitext(os.path.basename(f))[0])[0]
+            label_path = _find_label(labels_dir, subject_id)
+            samples.append({"image": f, "label": label_path, "multi_file": False})
 
-    # Single 4-D file per subject
-    label_name = os.path.basename(first_file)
-    label_path = _find_label(labels_dir, os.path.splitext(os.path.splitext(label_name)[0])[0])
-    return {"image": first_file, "label": label_path, "multi_file": False}
+    return samples
 
 
 def _find_label(labels_dir: str, subject_id: str) -> str:
@@ -155,6 +159,11 @@ def run_inference(cfg: DictConfig) -> dict:
     """
     start_time = time.time()
 
+    # cuDNN's autotuner (benchmark=True) selects a conv3d kernel that crashes
+    # on RTX 40-series for SegResNet's 224x224x144 shape. Force deterministic.
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+
     os.makedirs(cfg.paths.output_dir, exist_ok=True)
     device = torch.device(cfg.device_name)
 
@@ -179,87 +188,18 @@ def run_inference(cfg: DictConfig) -> dict:
     model.eval()
 
     # ------------------------------------------------------------------
-    # 3. Find input data (uploaded file or MSD sample)
+    # 3. Find input data (uploaded file or all MSD samples)
     # ------------------------------------------------------------------
     input_image = cfg.paths.get("input_image", None)
     if input_image and os.path.isfile(input_image):
         log.info("Using uploaded image: %s", input_image)
-        sample = {"image": input_image, "label": "", "multi_file": False}
+        samples = [{"image": input_image, "label": "", "multi_file": False}]
     else:
-        sample = _find_sample_data(cfg.paths.msd_data_dir, cfg.tool.dataset_task)
-        log.info("Using MSD sample image: %s", sample["image"])
+        samples = _find_sample_data(cfg.paths.msd_data_dir, cfg.tool.dataset_task)
+        log.info("Found %d MSD subject(s) to process.", len(samples))
 
     # ------------------------------------------------------------------
-    # 4. Build transforms and load data
-    # ------------------------------------------------------------------
-    if sample["multi_file"]:
-        # Stack individual modality files into a single 4-channel volume
-        log.info("Loading %d modality files and stacking ...", len(sample["image"]))
-        volumes = []
-        affine = None
-        for mod_path in sample["image"]:
-            nii = nib.load(mod_path)
-            if affine is None:
-                affine = nii.affine
-            volumes.append(nii.get_fdata(dtype=np.float32))
-        # Stack along new first axis -> (4, H, W, D)
-        stacked = np.stack(volumes, axis=0)
-        img_tensor = torch.from_numpy(stacked).unsqueeze(0)  # (1, 4, H, W, D)
-
-        # Normalize intensity: per-channel, nonzero only
-        for ch in range(img_tensor.shape[1]):
-            ch_data = img_tensor[0, ch]
-            nonzero_mask = ch_data != 0
-            if nonzero_mask.any():
-                mean = ch_data[nonzero_mask].mean()
-                std = ch_data[nonzero_mask].std()
-                if std > 0:
-                    img_tensor[0, ch] = torch.where(
-                        nonzero_mask,
-                        (ch_data - mean) / std,
-                        ch_data,
-                    )
-
-        # Load label if available
-        label_data = None
-        if sample["label"] and os.path.isfile(sample["label"]):
-            label_nii = nib.load(sample["label"])
-            label_data = label_nii.get_fdata(dtype=np.float32)
-    else:
-        # Single 4-D file — use MONAI transform pipeline
-        data_dict = {"image": sample["image"]}
-        has_label = sample["label"] and os.path.isfile(sample["label"])
-        if has_label:
-            data_dict["label"] = sample["label"]
-
-        if has_label:
-            transforms = Compose([
-                LoadImaged(keys=["image", "label"]),
-                EnsureChannelFirstd(keys=["image", "label"]),
-                ConvertToMultiChannelBasedOnBratsClassesd(keys="label"),
-                NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
-            ])
-        else:
-            transforms = Compose([
-                LoadImaged(keys=["image"]),
-                EnsureChannelFirstd(keys=["image"]),
-                NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
-            ])
-
-        data_dict = transforms(data_dict)
-        img_tensor = data_dict["image"].unsqueeze(0)  # (1, C, H, W, D)
-        affine = data_dict["image"].meta.get("affine", np.eye(4)) if hasattr(data_dict["image"], "meta") else np.eye(4)
-
-        if has_label:
-            label_data = data_dict["label"]
-        else:
-            label_data = None
-
-    log.info("Input tensor shape: %s", list(img_tensor.shape))
-    img_tensor = img_tensor.to(device)
-
-    # ------------------------------------------------------------------
-    # 5. Sliding-window inference
+    # 4. Shared inferer
     # ------------------------------------------------------------------
     roi_size = list(cfg.tool.roi_size)
     inferer = SlidingWindowInferer(
@@ -268,60 +208,124 @@ def run_inference(cfg: DictConfig) -> dict:
         overlap=cfg.tool.overlap,
     )
 
-    log.info(
-        "Running sliding-window inference (roi=%s, sw_batch=%d, overlap=%.2f) on %s ...",
-        roi_size,
-        cfg.tool.sw_batch_size,
-        cfg.tool.overlap,
-        device,
-    )
+    mask_paths = []
+    last = {"mask_path": "", "image_path": "", "label_path": ""}
 
-    with torch.no_grad():
-        output = inferer(img_tensor, model)  # (1, 3, H, W, D)
+    for s_idx, sample in enumerate(samples, start=1):
+        log.info("[%d/%d] Processing %s", s_idx, len(samples), sample["image"])
 
-    # ------------------------------------------------------------------
-    # 6. Post-processing: sigmoid + threshold
-    # ------------------------------------------------------------------
-    output_sigmoid = torch.sigmoid(output)
-    seg_mask = (output_sigmoid > 0.5).float()  # (1, 3, H, W, D)
+        if sample["multi_file"]:
+            log.info("  Loading %d modality files and stacking ...", len(sample["image"]))
+            volumes = []
+            affine = None
+            for mod_path in sample["image"]:
+                nii = nib.load(mod_path)
+                if affine is None:
+                    affine = nii.affine
+                volumes.append(nii.get_fdata(dtype=np.float32))
+            stacked = np.stack(volumes, axis=0)
+            img_tensor = torch.from_numpy(stacked).unsqueeze(0)
 
-    seg_np = seg_mask[0].cpu().numpy().astype(np.uint8)  # (3, H, W, D)
-    log.info("Segmentation mask shape: %s", list(seg_np.shape))
+            for ch in range(img_tensor.shape[1]):
+                ch_data = img_tensor[0, ch]
+                nonzero_mask = ch_data != 0
+                if nonzero_mask.any():
+                    mean = ch_data[nonzero_mask].mean()
+                    std = ch_data[nonzero_mask].std()
+                    if std > 0:
+                        img_tensor[0, ch] = torch.where(
+                            nonzero_mask,
+                            (ch_data - mean) / std,
+                            ch_data,
+                        )
+        else:
+            data_dict = {"image": sample["image"]}
+            has_label = sample["label"] and os.path.isfile(sample["label"])
+            if has_label:
+                data_dict["label"] = sample["label"]
+                transforms = Compose([
+                    LoadImaged(keys=["image", "label"]),
+                    EnsureChannelFirstd(keys=["image", "label"]),
+                    ConvertToMultiChannelBasedOnBratsClassesd(keys="label"),
+                    NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
+                ])
+            else:
+                transforms = Compose([
+                    LoadImaged(keys=["image"]),
+                    EnsureChannelFirstd(keys=["image"]),
+                    NormalizeIntensityd(keys="image", nonzero=True, channel_wise=True),
+                ])
 
-    for i, target in enumerate(cfg.tool.targets):
-        voxel_count = int(seg_np[i].sum())
-        log.info("  %s: %d positive voxels", target, voxel_count)
+            data_dict = transforms(data_dict)
+            img_tensor = data_dict["image"].unsqueeze(0)
+            affine = (
+                data_dict["image"].meta.get("affine", np.eye(4))
+                if hasattr(data_dict["image"], "meta")
+                else np.eye(4)
+            )
 
-    # ------------------------------------------------------------------
-    # 7. Save output as NIfTI
-    # ------------------------------------------------------------------
-    # Use the original affine if available, otherwise identity
-    if affine is None:
-        affine = np.eye(4)
-    if isinstance(affine, torch.Tensor):
-        affine = affine.cpu().numpy()
-    affine = np.array(affine, dtype=np.float64)
+        log.info("  Input tensor shape: %s", list(img_tensor.shape))
+        img_tensor = img_tensor.to(device)
 
-    # Transpose from (C, H, W, D) to (H, W, D, C) for NIfTI convention
-    seg_nifti_data = np.transpose(seg_np, (1, 2, 3, 0))
+        with torch.no_grad():
+            output = inferer(img_tensor, model)
 
-    mask_filename = "brain_tumor_seg.nii.gz"
-    mask_path = os.path.join(cfg.paths.output_dir, mask_filename)
-    nifti_img = nib.Nifti1Image(seg_nifti_data, affine)
-    nib.save(nifti_img, mask_path)
-    log.info("Saved 3-channel segmentation mask to: %s", mask_path)
+        output_sigmoid = torch.sigmoid(output)
+        seg_mask = (output_sigmoid > 0.5).float()
+        seg_np = seg_mask[0].cpu().numpy().astype(np.uint8)
+        log.info("  Segmentation mask shape: %s", list(seg_np.shape))
+        for i, target in enumerate(cfg.tool.targets):
+            voxel_count = int(seg_np[i].sum())
+            log.info("    %s: %d positive voxels", target, voxel_count)
+
+        if affine is None:
+            affine = np.eye(4)
+        if isinstance(affine, torch.Tensor):
+            affine = affine.cpu().numpy()
+        affine = np.array(affine, dtype=np.float64)
+
+        seg_nifti_data = np.transpose(seg_np, (1, 2, 3, 0))
+
+        # Derive a per-sample basename
+        if sample["multi_file"]:
+            first_mod = os.path.basename(sample["image"][0])
+            base_no_ext = os.path.splitext(os.path.splitext(first_mod)[0])[0]
+            for sfx in ("_t1", "_t1ce", "_t2", "_flair"):
+                if base_no_ext.lower().endswith(sfx):
+                    base_no_ext = base_no_ext[: -len(sfx)]
+                    break
+            sample_basename = base_no_ext
+        else:
+            sample_basename = os.path.splitext(
+                os.path.splitext(os.path.basename(sample["image"]))[0]
+            )[0]
+
+        mask_path = os.path.join(
+            cfg.paths.output_dir, f"{sample_basename}_brain_tumor_seg.nii.gz"
+        )
+        nib.save(nib.Nifti1Image(seg_nifti_data, affine), mask_path)
+        log.info("  Saved 3-channel segmentation mask to: %s", mask_path)
+        mask_paths.append(mask_path)
+
+        last = {
+            "mask_path": mask_path,
+            "image_path": sample["image"],
+            "label_path": sample.get("label", ""),
+        }
 
     elapsed = time.time() - start_time
-    log.info("Inference completed in %.2f seconds.", elapsed)
-
-    # Return image/label paths for visualization
-    img_path = sample["image"]  # str or list[str]
-    lbl_path = sample.get("label", "")
+    log.info(
+        "Inference completed for %d sample(s) in %.2f seconds.",
+        len(samples),
+        elapsed,
+    )
 
     return {
-        "mask_path": mask_path,
+        "mask_path": last["mask_path"],
+        "mask_paths": mask_paths,
+        "num_samples": len(samples),
         "num_classes": int(cfg.tool.num_classes),
         "elapsed_sec": round(elapsed, 4),
-        "image_path": img_path,
-        "label_path": lbl_path,
+        "image_path": last["image_path"],
+        "label_path": last["label_path"],
     }

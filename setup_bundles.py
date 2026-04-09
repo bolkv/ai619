@@ -32,7 +32,7 @@ def download_cxr_samples(data_dir: str = None, count: int = 10) -> None:
     Library of Medicine.  Only *count* images are fetched (default 10).
     """
     if data_dir is None:
-        data_dir = os.path.join(os.path.dirname(__file__), "data", "cxr_samples")
+        data_dir = os.path.join(os.path.dirname(__file__), "datasets", "cxr_samples")
     os.makedirs(data_dir, exist_ok=True)
 
     samples = CXR_SAMPLE_FILES[:count]
@@ -52,7 +52,7 @@ def download_cxr_samples(data_dir: str = None, count: int = 10) -> None:
     print(f"CXR samples ready: {len(downloaded)} images in {data_dir}")
 
 
-def download_bundles(bundle_dir: str = "./bundles") -> None:
+def download_bundles(bundle_dir: str = "./weights/bundles") -> None:
     from monai.bundle import download
 
     os.makedirs(bundle_dir, exist_ok=True)
@@ -60,6 +60,7 @@ def download_bundles(bundle_dir: str = "./bundles") -> None:
     bundles = [
         "brats_mri_segmentation",
         "pancreas_ct_dints_segmentation",
+        "spleen_ct_segmentation",
     ]
     for name in bundles:
         print(f"Downloading {name}...")
@@ -67,12 +68,12 @@ def download_bundles(bundle_dir: str = "./bundles") -> None:
     print("All bundles downloaded.")
 
 
-def download_datasets(data_dir: str = "./data/msd") -> None:
+def download_datasets(data_dir: str = "./datasets/msd") -> None:
     from monai.apps import DecathlonDataset
 
     os.makedirs(data_dir, exist_ok=True)
 
-    tasks = ["Task01_BrainTumour", "Task07_Pancreas"]
+    tasks = ["Task01_BrainTumour", "Task07_Pancreas", "Task09_Spleen"]
     for task in tasks:
         print(f"Downloading {task}...")
         DecathlonDataset(
@@ -89,9 +90,9 @@ if __name__ == "__main__":
     parser.add_argument("--bundles-only", action="store_true", help="Download bundles only")
     parser.add_argument("--datasets-only", action="store_true", help="Download datasets only")
     parser.add_argument("--cxr-only", action="store_true", help="Download CXR samples only")
-    parser.add_argument("--bundle-dir", default="./bundles")
-    parser.add_argument("--data-dir", default="./data/msd")
-    parser.add_argument("--cxr-dir", default="./data/cxr_samples")
+    parser.add_argument("--bundle-dir", default="./weights/bundles")
+    parser.add_argument("--data-dir", default="./datasets/msd")
+    parser.add_argument("--cxr-dir", default="./datasets/cxr_samples")
     parser.add_argument("--cxr-count", type=int, default=10, help="Number of CXR samples to download")
     args = parser.parse_args()
 

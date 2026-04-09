@@ -1,5 +1,24 @@
-data_dir: ./data
-bundle_dir: ./bundles
+# Two top-level roots:
+#   datasets/   raw input data (images, labels, nnUNet raw/preprocessed)
+#   weights/    all model checkpoints (nnUNet results, SAM, MONAI bundles)
+#
+# Tool infer.py modules reference: msd_data_dir, bundle_dir, cxr_image_path,
+# nnunet_raw/preprocessed/results, sam_checkpoint. Keep these keys stable so
+# individual tools stay plug-and-play.
+
+datasets_dir: ./datasets
+weights_dir: ./weights
+
+# --- data ---
+data_dir: ${paths.datasets_dir}
+msd_data_dir: ${paths.datasets_dir}/msd
+cxr_image_path: ${paths.datasets_dir}/cxr_samples/MCUCXR_0001_0.png
+nnunet_raw: ${paths.datasets_dir}/nnunet_raw
+nnunet_preprocessed: ${paths.datasets_dir}/nnunet_preprocessed
+
+# --- weights ---
+bundle_dir: ${paths.weights_dir}/bundles
+nnunet_results: ${paths.weights_dir}/nnunet
+sam_checkpoint: ${paths.weights_dir}/sam/sam_vit_h_4b8939.pth
+
 output_dir: ./results/${tool.name}/${now:%Y-%m-%d_%H-%M-%S}
-cxr_image_path: ${paths.data_dir}/cxr_samples/MCUCXR_0001_0.png
-msd_data_dir: ${paths.data_dir}/msd
