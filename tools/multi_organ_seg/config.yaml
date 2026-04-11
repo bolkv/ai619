@@ -1,5 +1,5 @@
-name: nnunet_amos
-display_name: "nnU-Net v2 — AMOS CT (Dataset052)"
+name: multi_organ_seg
+display_name: "AMOS CT Multi-Organ Segmentation (MaskSAM · nnU-Net v2)"
 framework: nnunet
 input_type: 3d_ct
 input_channels: 1
@@ -36,5 +36,5 @@ tile_step_size: 0.5
 use_mirroring: false         # SAM ViT-H is heavy; disable TTA mirroring to save memory
 perform_everything_on_device: false  # offload sliding-window buffers to CPU
 
-# Optional: override input volume; otherwise first file under datasets/amos/validation/ is used.
+# Optional: override input volume; otherwise first file under imagesTs is used.
 # input_image: null

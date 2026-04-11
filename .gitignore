@@ -1,11 +1,7 @@
-# Data & model weights (large files)
-datasets/
-weights/
-
-# Outputs
-results/
-outputs/
-hydra_outputs/
+# Per-tool runtime data (large binaries + outputs)
+tools/*/weights/
+tools/*/dataset/
+tools/*/results/
 
 # Python
 __pycache__/

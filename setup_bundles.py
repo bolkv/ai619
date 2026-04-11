@@ -1,9 +1,39 @@
-"""Download MONAI bundles, MSD test datasets, and CXR sample images."""
+"""Download MONAI bundles, MSD test datasets, and CXR sample images.
+
+Each asset is placed inside its tool's folder under ``tools/<task>_seg/``:
+
+    brats_mri_segmentation           -> tools/brain_tumor_seg/weights/
+    spleen_ct_segmentation           -> tools/spleen_seg/weights/
+    pancreas_ct_dints_segmentation   -> tools/pancreas_tumor_seg/weights/
+    Task01_BrainTumour               -> tools/brain_tumor_seg/dataset/
+    Task07_Pancreas                  -> tools/pancreas_tumor_seg/dataset/
+    Task09_Spleen                    -> tools/spleen_seg/dataset/
+    Montgomery CXR samples           -> tools/lung_seg/dataset/
+"""
 
 import argparse
 import os
 import urllib.request
 
+
+_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+_TOOLS_DIR = os.path.join(_REPO_ROOT, "tools")
+
+# (bundle_name, tool_folder) pairs. Bundles are extracted into
+# tools/<tool>/weights/<bundle_name>/...
+_BUNDLE_TO_TOOL = [
+    ("brats_mri_segmentation", "brain_tumor_seg"),
+    ("spleen_ct_segmentation", "spleen_seg"),
+    ("pancreas_ct_dints_segmentation", "pancreas_tumor_seg"),
+]
+
+# (msd_task, tool_folder) pairs. MSD tasks are extracted into
+# tools/<tool>/dataset/<task>/...
+_MSD_TASK_TO_TOOL = [
+    ("Task01_BrainTumour", "brain_tumor_seg"),
+    ("Task07_Pancreas", "pancreas_tumor_seg"),
+    ("Task09_Spleen", "spleen_seg"),
+]
 
 CXR_BASE_URL = (
     "https://data.lhncbc.nlm.nih.gov/public/"
@@ -25,18 +55,12 @@ CXR_SAMPLE_FILES = [
 ]
 
 
-def download_cxr_samples(data_dir: str = None, count: int = 10) -> None:
-    """Download CXR sample images from NIH Montgomery County CXR Set.
-
-    This is a public TB screening CXR dataset provided by the U.S. National
-    Library of Medicine.  Only *count* images are fetched (default 10).
-    """
-    if data_dir is None:
-        data_dir = os.path.join(os.path.dirname(__file__), "datasets", "cxr_samples")
+def download_cxr_samples(count: int = 10) -> None:
+    """Download CXR sample images from the NIH Montgomery County CXR Set."""
+    data_dir = os.path.join(_TOOLS_DIR, "lung_seg", "dataset")
     os.makedirs(data_dir, exist_ok=True)
 
-    samples = CXR_SAMPLE_FILES[:count]
-    for fname in samples:
+    for fname in CXR_SAMPLE_FILES[:count]:
         dest = os.path.join(data_dir, fname)
         if os.path.isfile(dest):
             print(f"  Already exists: {fname}")
@@ -52,30 +76,24 @@ def download_cxr_samples(data_dir: str = None, count: int = 10) -> None:
     print(f"CXR samples ready: {len(downloaded)} images in {data_dir}")
 
 
-def download_bundles(bundle_dir: str = "./weights/bundles") -> None:
+def download_bundles() -> None:
     from monai.bundle import download
 
-    os.makedirs(bundle_dir, exist_ok=True)
-
-    bundles = [
-        "brats_mri_segmentation",
-        "pancreas_ct_dints_segmentation",
-        "spleen_ct_segmentation",
-    ]
-    for name in bundles:
-        print(f"Downloading {name}...")
-        download(name=name, bundle_dir=bundle_dir)
+    for bundle_name, tool in _BUNDLE_TO_TOOL:
+        bundle_dir = os.path.join(_TOOLS_DIR, tool, "weights")
+        os.makedirs(bundle_dir, exist_ok=True)
+        print(f"Downloading {bundle_name} -> {bundle_dir}")
+        download(name=bundle_name, bundle_dir=bundle_dir)
     print("All bundles downloaded.")
 
 
-def download_datasets(data_dir: str = "./datasets/msd") -> None:
+def download_datasets() -> None:
     from monai.apps import DecathlonDataset
 
-    os.makedirs(data_dir, exist_ok=True)
-
-    tasks = ["Task01_BrainTumour", "Task07_Pancreas", "Task09_Spleen"]
-    for task in tasks:
-        print(f"Downloading {task}...")
+    for task, tool in _MSD_TASK_TO_TOOL:
+        data_dir = os.path.join(_TOOLS_DIR, tool, "dataset")
+        os.makedirs(data_dir, exist_ok=True)
+        print(f"Downloading {task} -> {data_dir}")
         DecathlonDataset(
             root_dir=data_dir,
             task=task,
@@ -86,23 +104,23 @@ def download_datasets(data_dir: str = "./datasets/msd") -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Download MONAI bundles and MSD datasets")
+    parser = argparse.ArgumentParser(
+        description="Download MONAI bundles, MSD datasets, and CXR samples "
+        "into each tool's folder under tools/<task>_seg/."
+    )
     parser.add_argument("--bundles-only", action="store_true", help="Download bundles only")
     parser.add_argument("--datasets-only", action="store_true", help="Download datasets only")
     parser.add_argument("--cxr-only", action="store_true", help="Download CXR samples only")
-    parser.add_argument("--bundle-dir", default="./weights/bundles")
-    parser.add_argument("--data-dir", default="./datasets/msd")
-    parser.add_argument("--cxr-dir", default="./datasets/cxr_samples")
     parser.add_argument("--cxr-count", type=int, default=10, help="Number of CXR samples to download")
     args = parser.parse_args()
 
     if args.datasets_only:
-        download_datasets(args.data_dir)
+        download_datasets()
     elif args.bundles_only:
-        download_bundles(args.bundle_dir)
+        download_bundles()
     elif args.cxr_only:
-        download_cxr_samples(args.cxr_dir, args.cxr_count)
+        download_cxr_samples(args.cxr_count)
     else:
-        download_bundles(args.bundle_dir)
-        download_datasets(args.data_dir)
-        download_cxr_samples(args.cxr_dir, args.cxr_count)
+        download_bundles()
+        download_datasets()
+        download_cxr_samples(args.cxr_count)

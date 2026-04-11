@@ -1,0 +1,21 @@
+{
+  "name": "brain_tumor_seg",
+  "team": "team_name",
+  "description": "BraTS multi-class brain tumor segmentation using MONAI's SegResNet (brats_mri_segmentation bundle). Accepts a 3D BraTS MRI NIfTI volume and returns per-subject masks for ET, TC, WT.",
+  "entrypoint": "plugins.brain_tumor_seg.logic:execute",
+  "task": "image_segmentation",
+  "task_type": "analysis-task",
+  "modality": "image",
+  "approval_required": true,
+  "source": "plugin",
+  "source_types": ["nifti"],
+  "orchestration": {
+    "consumes": ["nifti_file"],
+    "produces": ["segmentation_result"],
+    "priority": 80
+  },
+  "routing": {
+    "trigger_keywords": ["brain tumor", "brats", "tumor segmentation", "brain mri", "enhancing tumor", "whole tumor", "segresnet"],
+    "result_slot": "segmentation_result"
+  }
+}

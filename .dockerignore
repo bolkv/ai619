@@ -6,14 +6,10 @@ __pycache__
 *.egg-info
 .eggs
 
-# Data and weights are mounted at runtime, not baked into the image
-datasets
-weights
-
-# Runtime outputs
-results
-outputs
-hydra_outputs
+# Per-tool data and weights are mounted at runtime, not baked into the image
+tools/*/weights
+tools/*/dataset
+tools/*/results
 
 # IDE
 .vscode

@@ -24,16 +24,18 @@ RUN pip install --index-url https://download.pytorch.org/whl/cu121 \
       torch==2.1.2 torchvision==0.16.2 \
  && pip install -r requirements.txt
 
-COPY tools/nnunet_amos/vendor /workspace/tools/nnunet_amos/vendor
+COPY tools/multi_organ_seg/vendor /workspace/tools/multi_organ_seg/vendor
 
 RUN nvcc --version && \
     python -c "import torch; print(torch.__version__, torch.version.cuda)" && \
-    pip install -e /workspace/tools/nnunet_amos/vendor --no-build-isolation
+    pip install -e /workspace/tools/multi_organ_seg/vendor --no-build-isolation
 
 COPY . /workspace
 
-ENV nnUNet_raw=/workspace/datasets/nnunet_raw \
-    nnUNet_preprocessed=/workspace/datasets/nnunet_preprocessed
+ENV nnUNet_raw=/workspace/tools/multi_organ_seg/dataset/nnunet_raw \
+    nnUNet_preprocessed=/workspace/tools/multi_organ_seg/dataset/nnunet_preprocessed \
+    nnUNet_results=/workspace/tools/multi_organ_seg/weights/nnunet \
+    SAM_CHECKPOINT=/workspace/tools/multi_organ_seg/weights/sam/sam_vit_h_4b8939.pth
 
 
 CMD ["bash"]

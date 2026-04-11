@@ -1,10 +1,9 @@
-"""nnU-Net v2 inference wrapper.
+"""nnU-Net v2 inference wrapper for AMOS CT multi-organ segmentation.
 
 Runs a trained nnU-Net model (default: ``Dataset052_AMOS22_OnlyCT`` /
-``MaskSAM_AMOS`` / ``3d_fullres`` / fold 2) on a single CT volume from
-``datasets/amos/validation/``.
+``MaskSAM_AMOS`` / ``3d_fullres`` / fold 2) on a single CT volume.
 
-The nnUNet library is vendored under ``tools/nnunet_amos/vendor/`` and
+The nnUNet library is vendored under ``tools/multi_organ_seg/vendor/`` and
 inserted into ``sys.path`` at import time so no global install is needed.
 Required env vars (``nnUNet_raw``, ``nnUNet_preprocessed``, ``nnUNet_results``)
 are populated from ``cfg.paths`` before nnUNet is imported.

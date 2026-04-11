@@ -1,4 +1,4 @@
-name: cxr_lung_seg
+name: lung_seg
 display_name: "CXR Lung Segmentation"
 framework: torchxrayvision
 model_class: PSPNet

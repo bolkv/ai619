@@ -1,0 +1,21 @@
+{
+  "name": "spleen_seg",
+  "team": "team_name",
+  "description": "Spleen CT segmentation using MONAI's UNet (spleen_ct_segmentation bundle). Accepts a 3D abdominal CT NIfTI volume and returns a 2-class mask (background / spleen).",
+  "entrypoint": "plugins.spleen_seg.logic:execute",
+  "task": "image_segmentation",
+  "task_type": "analysis-task",
+  "modality": "image",
+  "approval_required": true,
+  "source": "plugin",
+  "source_types": ["nifti"],
+  "orchestration": {
+    "consumes": ["nifti_file"],
+    "produces": ["segmentation_result"],
+    "priority": 80
+  },
+  "routing": {
+    "trigger_keywords": ["spleen", "spleen segmentation", "abdominal ct", "unet"],
+    "result_slot": "segmentation_result"
+  }
+}

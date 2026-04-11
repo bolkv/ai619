@@ -1,0 +1,21 @@
+{
+  "name": "lung_seg",
+  "team": "team_name",
+  "description": "Chest X-ray lung segmentation using torchxrayvision's PSPNet (chestx_det). Accepts a 2D CXR image (.png/.jpg) and returns a binary lung mask PNG.",
+  "entrypoint": "plugins.lung_seg.logic:execute",
+  "task": "image_segmentation",
+  "task_type": "analysis-task",
+  "modality": "image",
+  "approval_required": true,
+  "source": "plugin",
+  "source_types": ["image"],
+  "orchestration": {
+    "consumes": ["image_file"],
+    "produces": ["segmentation_result"],
+    "priority": 80
+  },
+  "routing": {
+    "trigger_keywords": ["lung", "cxr", "chest x-ray", "lung segmentation", "pspnet", "chestx-det"],
+    "result_slot": "segmentation_result"
+  }
+}

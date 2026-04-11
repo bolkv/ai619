@@ -1,69 +1,131 @@
 # Medical Segmentation Harness
 
-A Hydra-based medical image segmentation harness that wraps MONAI bundles, nnU-Net v2, and torchxrayvision under a single dict-in / dict-out plugin interface. Designed to plug into [chatclinic-multimodal](../chatclinic-multimodal) as `medseg_harness` but also usable standalone (CLI or Python).
+A medical image segmentation harness wrapping MONAI bundles, nnU-Net v2, and torchxrayvision as self-contained per-task plugins. Each tool lives under `tools/<task>_seg/` with its own `logic.py` entrypoint, `infer.py` inference code, `tool.json` manifest, `config.yaml` settings, and local `weights/` / `dataset/` / `results/` folders.
 
 ## Supported Tools
 
-| Tool (`tool_name`) | Framework | Input | Dataset | Model |
-|---|---|---|---|---|
-| `spleen_seg` | MONAI Bundle | 3D CT | MSD Task09_Spleen | `spleen_ct_segmentation` (UNet) |
-| `brain_tumor_seg` | MONAI Bundle | 3D MRI (4ch) | MSD Task01_BrainTumour | `brats_mri_segmentation` (SegResNet) |
-| `pancreas_tumor_seg` | MONAI Bundle | 3D CT | MSD Task07_Pancreas | `pancreas_ct_dints_segmentation` (DiNTS) |
-| `cxr_lung_seg` | torchxrayvision | 2D CXR | Montgomery CXR | `chestx_det` (PSPNet) |
-| `nnunet_amos` | nnU-Net v2 | 3D CT | AMOS 2022 (CT) | `Dataset052_AMOS22_OnlyCT` / MaskSAM |
+| Folder | Task | Framework | Input | Dataset | Backing model |
+|---|---|---|---|---|---|
+| `tools/brain_tumor_seg/` | BraTS brain tumor (ET / TC / WT) | MONAI Bundle | 3D MRI (4ch) | MSD Task01_BrainTumour | `brats_mri_segmentation` (SegResNet) |
+| `tools/spleen_seg/` | Spleen | MONAI Bundle | 3D CT | MSD Task09_Spleen | `spleen_ct_segmentation` (UNet) |
+| `tools/pancreas_tumor_seg/` | Pancreas + tumor | MONAI Bundle | 3D CT | MSD Task07_Pancreas | `pancreas_ct_dints_segmentation` (DiNTS) |
+| `tools/lung_seg/` | CXR lungs | torchxrayvision | 2D CXR | Montgomery CXR | `chestx_det` (PSPNet) |
+| `tools/multi_organ_seg/` | AMOS 16-organ | nnU-Net v2 | 3D CT | AMOS 2022 (CT) | `Dataset052_AMOS22_OnlyCT` / MaskSAM |
 
-Each tool iterates over **all cases** in its dataset directory, or can be pointed at a single file via the payload.
+Each tool iterates over **all cases** in its local `dataset/` directory, or can be pointed at a single file via the payload.
 
 ## Directory Layout
 
 ```
 .
-├── logic.py                # Plugin entrypoint: execute(payload) -> dict
-├── run.py                  # Thin CLI wrapper (--input, --output JSON)
-├── tool.json               # Plugin manifest (chatclinic format)
-├── visualize.py            # 2D/3D visualization (auto-picks best slice)
 ├── setup_bundles.py        # Download MONAI bundles + MSD datasets + CXR samples
-├── download_spleen.py      # Spleen-only dataset download
-├── Dockerfile
-├── requirements.txt
-├── configs/
-│   ├── config.yaml         # Hydra defaults (tool, device, paths, seed)
-│   ├── tool/*.yaml         # Per-tool settings
-│   ├── paths/default.yaml  # datasets_dir, weights_dir, output_dir, ...
-│   └── device/{gpu,cpu}.yaml
-├── tools/
-│   ├── spleen_seg/infer.py
-│   ├── brain_tumor_seg/infer.py
-│   ├── pancreas_tumor_seg/infer.py
-│   ├── cxr_lung_seg/infer.py
-│   └── nnunet_amos/
-│       ├── infer.py
-│       └── vendor/nnunetv2/   # vendored nnU-Net v2
-├── weights/                # bundles/, nnunet/, sam/
-├── datasets/               # msd/, cxr_samples/, nnunet_raw/
-└── results/<tool>/<timestamp>/
+├── Dockerfile / docker-entrypoint.sh / requirements.txt
+└── tools/
+    ├── __init__.py                 # Namespace package marker (no central registry)
+    ├── brain_tumor_seg/
+    │   ├── logic.py                # Plugin entrypoint: execute(payload) -> dict
+    │   ├── infer.py                # Inference code (SegResNet, MONAI bundle)
+    │   ├── tool.json               # Per-tool plugin manifest
+    │   ├── config.yaml             # Per-tool settings (targets, roi_size, ...)
+    │   ├── weights/                # Pretrained weights
+    │   ├── dataset/                # Input data
+    │   └── results/                # Output masks (timestamped subdirs)
+    ├── spleen_seg/                 # same layout — spleen CT
+    ├── pancreas_tumor_seg/         # same layout — pancreas + tumor CT
+    ├── lung_seg/                   # same layout — CXR lung
+    └── multi_organ_seg/
+        ├── logic.py, infer.py, tool.json, config.yaml
+        ├── weights/, dataset/, results/
+        └── vendor/nnunetv2/        # vendored nnU-Net v2 source
+```
+
+## Model Weights Placement
+
+Each tool loads its weights from its own `weights/` folder. Run `setup_bundles.py --bundles-only` to fetch the MONAI bundles automatically, or place the files manually at:
+
+### `tools/brain_tumor_seg/` — SegResNet (BraTS)
+```
+tools/brain_tumor_seg/weights/brats_mri_segmentation/
+├── configs/inference.json
+└── models/model.pt
+```
+
+### `tools/spleen_seg/` — UNet (Spleen)
+```
+tools/spleen_seg/weights/spleen_ct_segmentation/
+├── configs/inference.json
+└── models/model.pt
+```
+
+### `tools/pancreas_tumor_seg/` — DiNTS (Pancreas + Tumor)
+```
+tools/pancreas_tumor_seg/weights/pancreas_ct_dints_segmentation/
+├── configs/inference.yaml
+└── models/model.pt
+```
+
+### `tools/lung_seg/` — PSPNet (CXR Lung)
+```
+tools/lung_seg/weights/cxr/
+└── pspnet_chestxray_best_model_4.pth
+```
+(torchxrayvision uses `weights/cxr/` as its cache directory; the checkpoint is downloaded automatically on first use if missing.)
+
+### `tools/multi_organ_seg/` — MaskSAM / nnU-Net v2 (AMOS CT) — manual
+```
+tools/multi_organ_seg/weights/
+├── nnunet/Dataset052_AMOS22_OnlyCT/MaskSAM_AMOS__nnUNetPlans__3d_fullres/
+│   ├── dataset.json
+│   ├── plans.json
+│   └── fold_2/checkpoint_final.pth
+└── sam/sam_vit_h_4b8939.pth
+```
+
+## Dataset Placement
+
+### MONAI-bundle tools (expect MSD task subfolders)
+```
+tools/brain_tumor_seg/dataset/Task01_BrainTumour/{imagesTr,labelsTr}/
+tools/spleen_seg/dataset/Task09_Spleen/{imagesTr,labelsTr}/
+tools/pancreas_tumor_seg/dataset/Task07_Pancreas/{imagesTr,labelsTr}/
+```
+
+### `tools/lung_seg/` — flat directory of CXR images
+```
+tools/lung_seg/dataset/MCUCXR_0001_0.png
+tools/lung_seg/dataset/MCUCXR_0002_0.png
+...
+```
+
+### `tools/multi_organ_seg/` — nnU-Net raw layout
+```
+tools/multi_organ_seg/dataset/
+├── nnunet_raw/Dataset052_AMOS22_OnlyCT/
+│   ├── dataset.json
+│   ├── imagesTs/*_0000.nii.gz
+│   └── labelsTs/*.nii.gz
+└── nnunet_preprocessed/   # populated by nnUNet during training/inference
 ```
 
 ## Plugin Interface
 
-`logic.execute(payload: dict) -> dict` is the single entrypoint. Payload fields:
+Every tool exposes the same `execute(payload: dict) -> dict` entrypoint as `tools.<task>_seg.logic.execute`. Payload fields:
 
 | Key | Type | Notes |
 |---|---|---|
 | `nifti_path` | str | Path to a 3D NIfTI volume (`.nii` / `.nii.gz`). |
 | `image_path` | str | Path to a 2D CXR image (`.png` / `.jpg`). |
 | `dicom_path` | str | Reserved (DICOM not supported yet). |
-| `tool_name` | str | One of the tools above. If omitted, inferred from the file extension. |
 | `file_name` | str | Optional display name. |
 | `device` | str | `"gpu"` (default) or `"cpu"`. |
-| `output_dir` | str | Override for segmentation output directory. |
-| `overrides` | list[str] | Extra Hydra-style overrides, e.g. `["tool.sw_batch_size=2"]`. |
+| `output_dir` | str | Override for segmentation output directory (defaults to `tools/<task>_seg/results/<timestamp>/`). |
+| `overrides` | list[str] | Extra `key=value` overrides applied to the tool's cfg before inference (e.g. `["tool.sw_batch_size=2"]`). |
 
 Return shape:
 
 ```json
 {
-  "tool": "medseg_harness",
+  "tool": "spleen_seg",
   "summary": "Spleen CT Segmentation: segmented 1 sample(s) from 'spleen_2.nii.gz' in 12.3s.",
   "analysis": {
     "file_name": "spleen_2.nii.gz",
@@ -77,11 +139,10 @@ Return shape:
   "artifacts": {
     "mask_path": ".../spleen_2_spleen_seg.nii.gz",
     "mask_paths": ["..."],
-    "image_path": ".../spleen_2_preproc.nii.gz",
-    "visualization_path": ".../visualization.png"
+    "image_path": ".../spleen_2_preproc.nii.gz"
   },
   "warnings": [],
-  "provenance": { "tool_version": "0.1.0", "received_keys": [...], "segmentation_tool": "spleen_seg" }
+  "provenance": { "tool_version": "0.1.0", "received_keys": [...] }
 }
 ```
 
@@ -95,126 +156,71 @@ docker build -t ai619 .
 
 ### 2. Run the container
 
-Expose ports for chatclinic integration and mount the repo:
-
 ```bash
 docker run \
---gpus '"device=3"' \
--it \
---ipc=host \
--v $(pwd):/workspace \
---shm-size=32g \
--p 8888:8888 \
---name medseg \
-ai619
+  --gpus '"device=3"' \
+  -it --ipc=host --shm-size=32g \
+  -v $(pwd):/workspace \
+  -p 8888:8888 \
+  --name medseg \
+  ai619
 ```
 
-Drop `--gpus all` on CPU-only hosts and pass `device=cpu` in payloads.
+Drop `--gpus` on CPU-only hosts and pass `"device": "cpu"` in payloads.
 
 ### 3. Prepare data and weights
 
 ```bash
-# Everything
+# Everything — downloads into each tool's weights/ and dataset/ folders
 python setup_bundles.py
 
 # Or partial
 python setup_bundles.py --bundles-only   # MONAI bundles only
 python setup_bundles.py --datasets-only  # MSD Tasks 01/07/09 only
 python setup_bundles.py --cxr-only       # 10 CXR samples only
-python download_spleen.py                # Spleen only (~1.5 GB)
 ```
 
-`nnunet_amos` requires manual setup:
-
-- **SAM checkpoint**: `weights/sam/sam_vit_h_4b8939.pth`
-- **Trained model**: `weights/nnunet/Dataset052_AMOS22_OnlyCT/MaskSAM_AMOS__nnUNetPlans__3d_fullres/fold_2/checkpoint_final.pth`
-- **Input volumes**: `datasets/nnunet_raw/Dataset052_AMOS22_OnlyCT/imagesTs/*_0000.nii.gz`
+`multi_organ_seg` (AMOS / nnU-Net v2) requires manual placement — see **Model Weights Placement** and **Dataset Placement** above.
 
 ## Usage
 
-### A) Python (direct)
+Each tool is an **independent plugin** — import its `execute` directly:
 
 ```python
-from logic import execute
+from tools.brain_tumor_seg.logic import execute
 
 result = execute({
-    "nifti_path": "/workspace/datasets/msd/Task09_Spleen/imagesTr/spleen_2.nii.gz",
-    "tool_name": "spleen_seg",
+    "nifti_path": "/workspace/tools/brain_tumor_seg/dataset/Task01_BrainTumour/imagesTr/BRATS_001.nii.gz",
 })
 print(result["artifacts"]["mask_path"])
-print(result["artifacts"]["visualization_path"])
 ```
 
-One-liner:
-
-```bash
-python -c "from logic import execute; import json; print(json.dumps(execute({'nifti_path':'/workspace/datasets/msd/Task09_Spleen/imagesTr/spleen_2.nii.gz','tool_name':'spleen_seg'}), indent=2, default=str))"
-```
-
-### B) CLI (file-based)
-
-```bash
-cat > /tmp/payload.json <<'EOF'
-{
-  "nifti_path": "/workspace/datasets/nnunet_raw/Dataset052_AMOS22_OnlyCT/imagesTs/amos0005_0000.nii.gz",
-  "tool_name": "nnunet_amos"
-}
-EOF
-
-python run.py --input /tmp/payload.json --output /tmp/result.json
-cat /tmp/result.json
-```
-
-### C) Through chatclinic-multimodal
-
-Place a shim plugin at `chatclinic-multimodal/plugins/medseg_harness/` that re-exports `execute` from this repo (already set up — see `plugins/medseg_harness/logic.py` in that repo). Then any of:
-
-1. **Generic tool endpoint** (works out of the box):
-   ```bash
-   curl -X POST http://127.0.0.1:8001/api/v1/tools/medseg_harness/run \
-     -H "Content-Type: application/json" \
-     -d '{"payload":{"nifti_path":"/path/to.nii.gz","tool_name":"spleen_seg"}}'
-   ```
-
-2. **Chat `@command`** requires adding an executor entry to `DIRECT_TOOL_ENDPOINT_EXECUTORS` under `"nifti"` in `app/services/chat.py` — not included by default.
+From any other host process, each tool's [`tool.json`](tools/brain_tumor_seg/tool.json) declares its entrypoint as `plugins.<task>_seg.logic:execute`, so a plugin host can register and invoke each tool independently — no need to import from `tools/__init__.py`.
 
 ## Config Overrides
 
-Anything in `configs/` can be overridden through the payload's `overrides` list (Hydra syntax):
+Pass `key=value` strings in the payload's `overrides` list; they are applied to the tool's cfg (`OmegaConf`) before inference:
 
 ```python
 execute({
     "nifti_path": "...",
-    "tool_name": "spleen_seg",
     "overrides": [
         "tool.sw_batch_size=2",
         "tool.overlap=0.25",
-        "save_output=false",
     ],
 })
 ```
 
-Key paths (`configs/paths/default.yaml`):
+Each tool's default paths (set by its `logic.py`) point into its own folder:
 
 | Key | Default |
 |---|---|
-| `paths.datasets_dir` | `./datasets` (absolute-resolved by logic.py) |
-| `paths.weights_dir` | `./weights` (absolute-resolved by logic.py) |
-| `paths.bundle_dir` | `${paths.weights_dir}/bundles` |
-| `paths.msd_data_dir` | `${paths.datasets_dir}/msd` |
-| `paths.nnunet_raw` | `${paths.datasets_dir}/nnunet_raw` |
-| `paths.nnunet_results` | `${paths.weights_dir}/nnunet` |
-| `paths.sam_checkpoint` | `${paths.weights_dir}/sam/sam_vit_h_4b8939.pth` |
-| `paths.output_dir` | `./results/${tool.name}/${now:...}` |
+| `paths.tool_dir` | `tools/<task>_seg/` |
+| `paths.weights_dir` | `tools/<task>_seg/weights/` |
+| `paths.dataset_dir` | `tools/<task>_seg/dataset/` |
+| `paths.output_dir` | `tools/<task>_seg/results/<timestamp>/` |
 
-`logic.py` rewrites `paths.datasets_dir` and `paths.weights_dir` to absolute paths at runtime so the plugin works regardless of the caller's cwd.
-
-## Visualization
-
-- 2D tools (`cxr_lung_seg`) → `visualize_2d` overlays mask on the CXR.
-- 3D tools → `visualize_3d` picks the **axial slice with the most foreground voxels** automatically (so small organs like the spleen don't land on an empty central slice).
-- `_label_to_rgb` uses matplotlib's `tab20` palette, so N-class label maps (e.g. 16-class AMOS) are rendered with distinct colors.
-- Disable visualization by passing `"overrides": ["save_output=false"]` in the payload.
+MONAI-bundle tools also expose `paths.bundle_dir` / `paths.msd_data_dir` (both aliased to the local `weights/` and `dataset/` folders). `multi_organ_seg` exposes `paths.nnunet_raw` / `nnunet_preprocessed` / `nnunet_results` / `sam_checkpoint`.
 
 ## Without Docker (local Python)
 
@@ -222,5 +228,5 @@ Key paths (`configs/paths/default.yaml`):
 python -m venv .venv && source .venv/bin/activate
 pip install torch==2.1.2 torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cu121
 pip install -r requirements.txt
-pip install -e tools/nnunet_amos/vendor  # only if using nnunet_amos
+pip install -e tools/multi_organ_seg/vendor  # only if using multi_organ_seg
 ```
