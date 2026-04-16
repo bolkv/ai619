@@ -15,7 +15,16 @@
     "priority": 80
   },
   "routing": {
-    "trigger_keywords": ["pancreas", "pancreas tumor", "pancreatic", "abdominal ct", "dints"],
+    "trigger_keywords": ["seg_pancreas", "seg-pancreas", "pancreas", "pancreas tumor", "pancreatic", "abdominal ct", "dints"],
     "result_slot": "segmentation_result"
+  },
+  "help": {
+    "summary": "Pancreas and tumor CT segmentation (3 classes) using MONAI DiNTS.",
+    "options": [],
+    "examples": [
+      "@seg_pancreas help",
+      "@seg_pancreas"
+    ],
+    "notes": ["Requires a 3D abdominal CT NIfTI volume."]
   }
 }

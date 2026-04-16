@@ -29,12 +29,12 @@ def _local_paths() -> Dict[str, str]:
 
 
 def _resolve_input_path(payload: Dict[str, Any]) -> str:
-    for key in ("nifti_path", "image_path", "dicom_path", "input_path"):
+    for key in ("source_nifti_path", "nifti_path", "image_path", "dicom_path", "input_path"):
         raw = payload.get(key)
         if raw:
             return str(raw).strip()
     raise ValueError(
-        "Payload must include one of: nifti_path, image_path, dicom_path."
+        "Payload must include one of: source_nifti_path, nifti_path, image_path, dicom_path, input_path."
     )
 
 

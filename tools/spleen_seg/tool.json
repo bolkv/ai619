@@ -15,7 +15,16 @@
     "priority": 80
   },
   "routing": {
-    "trigger_keywords": ["spleen", "spleen segmentation", "abdominal ct", "unet"],
+    "trigger_keywords": ["seg_spleen", "seg-spleen", "spleen", "spleen segmentation", "abdominal ct", "unet"],
     "result_slot": "segmentation_result"
+  },
+  "help": {
+    "summary": "Spleen CT segmentation (2 classes) using MONAI UNet.",
+    "options": [],
+    "examples": [
+      "@seg_spleen help",
+      "@seg_spleen"
+    ],
+    "notes": ["Requires a 3D abdominal CT NIfTI volume."]
   }
 }

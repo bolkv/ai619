@@ -15,7 +15,16 @@
     "priority": 80
   },
   "routing": {
-    "trigger_keywords": ["brain tumor", "brats", "tumor segmentation", "brain mri", "enhancing tumor", "whole tumor", "segresnet"],
+    "trigger_keywords": ["seg_brain", "seg-brain", "brain tumor", "brats", "tumor segmentation", "brain mri", "enhancing tumor", "whole tumor", "segresnet"],
     "result_slot": "segmentation_result"
+  },
+  "help": {
+    "summary": "BraTS multi-class brain tumor segmentation (ET/TC/WT) using MONAI SegResNet.",
+    "options": [],
+    "examples": [
+      "@seg_brain help",
+      "@seg_brain"
+    ],
+    "notes": ["Requires a 4-channel (T1, T1ce, T2, FLAIR) BraTS MRI NIfTI volume."]
   }
 }

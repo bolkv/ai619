@@ -15,7 +15,16 @@
     "priority": 80
   },
   "routing": {
-    "trigger_keywords": ["amos", "multi-organ", "nnunet", "masksam", "abdominal ct", "organ segmentation"],
+    "trigger_keywords": ["seg_organ", "seg-organ", "amos", "multi-organ", "nnunet", "masksam", "abdominal ct", "organ segmentation"],
     "result_slot": "segmentation_result"
+  },
+  "help": {
+    "summary": "AMOS CT multi-organ segmentation (16 classes) using MaskSAM-trained nnU-Net v2.",
+    "options": [],
+    "examples": [
+      "@seg_organ help",
+      "@seg_organ"
+    ],
+    "notes": ["Requires a 3D abdominal CT NIfTI volume."]
   }
 }
