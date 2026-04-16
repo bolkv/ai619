@@ -19,7 +19,7 @@ Each tool iterates over **all cases** in its local `dataset/` directory, or can 
 ```
 .
 ├── setup_bundles.py        # Download MONAI bundles + MSD datasets + CXR samples
-├── Dockerfile / docker-entrypoint.sh / requirements.txt
+├── Dockerfile                      # builds image + installs each tool's requirements.txt
 └── tools/
     ├── __init__.py                 # Namespace package marker (no central registry)
     ├── brain_tumor_seg/
@@ -224,9 +224,20 @@ MONAI-bundle tools also expose `paths.bundle_dir` / `paths.msd_data_dir` (both a
 
 ## Without Docker (local Python)
 
+Each tool ships its own pinned `requirements.txt`. Install just the tool you need, or all of them, into the same venv:
+
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install torch==2.1.2 torchvision==0.16.2 --index-url https://download.pytorch.org/whl/cu121
-pip install -r requirements.txt
-pip install -e tools/multi_organ_seg/vendor  # only if using multi_organ_seg
+
+# CUDA-pinned torch first (matches what the Dockerfile installs)
+pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
+
+# Per-tool dependencies (install only the ones you need)
+pip install -r tools/brain_tumor_seg/requirements.txt
+pip install -r tools/spleen_seg/requirements.txt
+pip install -r tools/pancreas_tumor_seg/requirements.txt
+pip install -r tools/lung_seg/requirements.txt
+pip install -r tools/multi_organ_seg/requirements.txt
 ```
+
+`multi_organ_seg` also relies on the vendored nnU-Net source under `tools/multi_organ_seg/vendor/`; `infer.py` adds that directory to `sys.path` at import time, so no `pip install -e` is required.
