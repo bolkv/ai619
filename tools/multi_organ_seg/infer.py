@@ -28,21 +28,7 @@ if _VENDOR_DIR not in sys.path:
 
 def _pick_inputs(cfg: DictConfig) -> list:
     """Return a list of input volume paths for inference."""
-    explicit = cfg.tool.get("input_image", None)
-    if explicit and os.path.isfile(explicit):
-        return [explicit]
-
-    images_ts = os.path.join(
-        cfg.paths.nnunet_raw, cfg.tool.dataset_name, "imagesTs"
-    )
-    candidates = sorted(glob.glob(os.path.join(images_ts, "*_0000.nii.gz")))
-    if not candidates:
-        raise FileNotFoundError(
-            f"No NIfTI volumes found under {images_ts}. "
-            "Place AMOS CT volumes there (with nnUNet _0000 channel suffix) "
-            "or pass tool.input_image=<path>."
-        )
-    return candidates
+    return [cfg.tool.input_image]
 
 
 def run_inference(cfg: DictConfig) -> dict:
@@ -108,8 +94,8 @@ def run_inference(cfg: DictConfig) -> dict:
         cfg.paths.output_dir,
         save_probabilities=False,
         overwrite=True,
-        num_processes_preprocessing=1,
-        num_processes_segmentation_export=1,
+        num_processes_preprocessing=4,
+        num_processes_segmentation_export=2,
     )
 
     mask_paths = []

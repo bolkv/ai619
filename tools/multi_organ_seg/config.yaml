@@ -34,7 +34,7 @@ checkpoint_name: checkpoint_final.pth
 
 tile_step_size: 0.5
 use_mirroring: false         # SAM ViT-H is heavy; disable TTA mirroring to save memory
-perform_everything_on_device: false  # offload sliding-window buffers to CPU
+perform_everything_on_device: true  # offload sliding-window buffers to CPU
 
 # Optional: override input volume; otherwise first file under imagesTs is used.
 # input_image: null
