@@ -4,10 +4,12 @@
   "description": "BraTS multi-class brain tumor segmentation using MONAI's SegResNet (brats_mri_segmentation bundle). Accepts a 3D BraTS MRI NIfTI volume and returns per-subject masks for ET, TC, WT.",
   "entrypoint": "plugins.brain_tumor_seg.logic:execute",
   "task": "image_segmentation",
-  "task_type": "analysis-task",
+  "task_type": "segmentation-task",
+  "recommended_stage": "on-demand",
   "modality": "image",
   "approval_required": true,
   "source": "plugin",
+  "aliases": ["seg_brain"],
   "source_types": ["nifti"],
   "orchestration": {
     "consumes": ["nifti_file"],
@@ -20,11 +22,20 @@
   },
   "help": {
     "summary": "BraTS multi-class brain tumor segmentation (ET/TC/WT) using MONAI SegResNet.",
+    "modes": [],
     "options": [],
     "examples": [
       "@seg_brain help",
       "@seg_brain"
     ],
     "notes": ["Requires a 4-channel (T1, T1ce, T2, FLAIR) BraTS MRI NIfTI volume."]
+  },
+  "runtime": {
+    "host_compatible": ["gpu"],
+    "supported_accelerators": ["gpu"],
+    "preferred_accelerator": "gpu",
+    "requires_gpu": true,
+    "allow_cpu_fallback": false,
+    "notes": "Requires GPU for 3D sliding-window inference (224x224x144 ROI)."
   }
 }

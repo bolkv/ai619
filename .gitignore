@@ -1,7 +1,10 @@
 # Per-tool runtime data (large binaries + outputs)
-tools/*/weights/
 tools/*/dataset/
 tools/*/results/
+
+# Model weight files (submitted separately)
+*.pt
+*.pth
 
 # Python
 __pycache__/

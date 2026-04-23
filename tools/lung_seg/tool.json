@@ -4,10 +4,12 @@
   "description": "Chest X-ray lung segmentation using torchxrayvision's PSPNet (chestx_det). Accepts a 2D CXR image (.png/.jpg) and returns a binary lung mask PNG.",
   "entrypoint": "plugins.lung_seg.logic:execute",
   "task": "image_segmentation",
-  "task_type": "analysis-task",
+  "task_type": "segmentation-task",
+  "recommended_stage": "on-demand",
   "modality": "image",
   "approval_required": true,
   "source": "plugin",
+  "aliases": ["seg_lung"],
   "source_types": ["image"],
   "orchestration": {
     "consumes": ["image_file"],
@@ -20,11 +22,20 @@
   },
   "help": {
     "summary": "Chest X-ray lung segmentation using torchxrayvision PSPNet.",
+    "modes": [],
     "options": [],
     "examples": [
       "@seg_lung help",
       "@seg_lung"
     ],
     "notes": ["Requires a 2D CXR image (PNG/JPG)."]
+  },
+  "runtime": {
+    "host_compatible": ["gpu"],
+    "supported_accelerators": ["gpu"],
+    "preferred_accelerator": "gpu",
+    "requires_gpu": true,
+    "allow_cpu_fallback": false,
+    "notes": "Requires GPU for PSPNet inference."
   }
 }

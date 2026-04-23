@@ -132,7 +132,7 @@ def _find_label(labels_dir: str, subject_id: str) -> str:
 
 def _load_weights(model: torch.nn.Module, bundle_dir: str, bundle_name: str) -> None:
     """Load pretrained weights from the downloaded bundle."""
-    weights_path = os.path.join(bundle_dir, bundle_name, "models", "model.pt")
+    weights_path = os.path.join(bundle_dir, bundle_name, "models", "brain_tumor_seg.pt")
     if not os.path.isfile(weights_path):
         raise FileNotFoundError(
             f"Model weights not found: {weights_path}\n"
