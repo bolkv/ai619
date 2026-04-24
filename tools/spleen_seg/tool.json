@@ -1,6 +1,6 @@
 {
   "name": "spleen_seg",
-  "team": "team_name",
+  "team": "segmentation_team",
   "description": "Spleen CT segmentation using MONAI's UNet (spleen_ct_segmentation bundle). Accepts a 3D abdominal CT NIfTI volume and returns a 2-class mask (background / spleen).",
   "entrypoint": "plugins.spleen_seg.logic:execute",
   "task": "image_segmentation",
@@ -36,6 +36,7 @@
     "preferred_accelerator": "gpu",
     "requires_gpu": true,
     "allow_cpu_fallback": false,
+    "estimated_runtime_sec": 5,
     "notes": "Requires GPU for UNet 3D sliding-window inference."
   }
 }

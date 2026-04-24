@@ -1,27 +1,27 @@
 # Skill Rationale
 
 ## Why this tool should exist
-- 현재 ChatClinic은 VCF, DICOM, NIfTI, 이미지 등 다양한 의료 데이터를 입력으로 받지만, 업로드된 의료 영상에서 관심 구조물을 분할하는 segmentation 기능은 제공되지 않는다. `nifti_review_tool`이 파일 메타데이터와 미리보기를 제공하더라도, 그다음 단계인 병변/장기 추출은 사용자가 외부 도구를 따로 돌려야만 가능하다. 임상 연구와 교육 환경에서 segmentation은 volumetric 측정, 병변 정량화, 치료 반응 평가 등 거의 모든 후속 분석의 전제가 되기 때문에, segmentation 관련 tool이 반드시 필요하다.
-- `brain_tumor_seg` (MONAI SegResNet, BraTS bundle): 4채널 BraTS MRI(T1, T1ce, T2, FLAIR)에서 ET/TC/WT 3-class 마스크를 생성하여 뇌종양 하위 영역을 분리한다.
-- 본 패치에서 활용되는 MONAI는 NVIDIA가 주도하는 PyTorch 기반 의료 영상 딥러닝 오픈소스 프레임워크로, 사전학습된 segmentation 모델을 재현 가능한 bundle 형태로 배포한다.
+- ChatClinic currently accepts a variety of medical data inputs (VCF, DICOM, NIfTI, images, etc.), but it does not provide a segmentation capability for extracting structures from uploaded medical images. Even though `nifti_review_tool` provides file metadata and previews, the next step — lesion/organ extraction — still requires running an external tool separately. In clinical research and educational settings, segmentation is the prerequisite for almost every downstream analysis such as volumetric measurement, lesion quantification, and treatment-response evaluation, so a segmentation tool is necessary.
+- `brain_tumor_seg` (MONAI SegResNet, BraTS bundle): Produces ET/TC/WT 3-class masks from a 4-channel BraTS MRI (T1, T1ce, T2, FLAIR) to delineate brain tumor sub-regions.
+- MONAI, used in this patch, is a PyTorch-based open-source medical-imaging deep-learning framework led by NVIDIA. It distributes pretrained segmentation models as reproducible bundles.
 
 ## Why the orchestrator should call it
-- 사용자가 의료 영상을 업로드한 뒤 segmentation을 명시적으로 요청할 때(`@seg_brain`), orchestrator는 입력된 키워드를 tool.json의 alias와 매칭하여 해당 tool을 호출한다. 이때 tool.json의 `source_types` 필드에 따라 현재 업로드된 소스 타입과 맞지 않으면 시스템이 자동으로 호출을 차단하므로, 잘못된 modality에 tool이 실행되는 상황을 막을 수 있다. 영상 분할은 단순 메타데이터 응답이나 LLM의 서술로는 대체 불가능한 연산 과정이므로, orchestrator가 직접 중개해 tool을 실행시키는 것이 유일하게 재현 가능하고 정량적인 결과를 얻는 방식이다.
-- 본 tool은 고유한 alias(`seg_brain`)를 가지도록 `trigger_keywords`에 등록되어 있어, 같은 키워드에 여러 tool이 매칭되는 충돌 없이 1:1로 라우팅된다. 사용자는 업로드한 영상의 modality/타겟에 맞는 alias를 고르기만 하면 되고, source_type 검증은 tool.json 선언을 통해 시스템이 대신 처리한다.
-  - 뇌종양 MRI: `@seg_brain` (`source_types: ["nifti"]`)
-- 각 tool.json의 `source_types`, `routing.trigger_keywords` 필드가 orchestrator의 라우팅 근거로 사용되므로, orchestrator는 파일을 열지 않고도 manifest 정보만으로 적절한 tool을 선택할 수 있다.
-- 본 tool은 결정론적인 inference 파이프라인을 거쳐 실제 마스크 파일을 artifact로 반환하므로, orchestrator는 영상 분할 요청을 이 tool로 처리함으로써 임상/연구 맥락에서 신뢰할 수 있는 형태의 결과를 확보할 수 있다.
+- When a user uploads a medical image and explicitly requests segmentation (`@seg_brain`), the orchestrator matches the keyword against the `aliases` defined in tool.json and invokes the corresponding tool. At the same time, tool.json's `source_types` field causes the system to automatically block the call if the current source type does not match, preventing the tool from being executed on the wrong modality. Image segmentation is a computational step that cannot be replaced by simple metadata responses or free-form LLM narration, so mediating the tool call through the orchestrator is the only way to obtain reproducible, quantitative results.
+- This tool is registered in `trigger_keywords` with a unique alias (`seg_brain`), ensuring 1:1 routing without collisions where the same keyword matches multiple tools. The user only needs to pick an alias that matches the modality/target of the uploaded image; the source_type check is handled by the system through tool.json declarations.
+  - Brain tumor MRI: `@seg_brain` (`source_types: ["nifti"]`)
+- The `source_types` and `routing.trigger_keywords` fields in each tool.json serve as the orchestrator's routing basis, so the orchestrator can pick the right tool purely from manifest information without opening the file itself.
+- This tool runs a deterministic inference pipeline and returns an actual mask file as an artifact. Routing a segmentation request to this tool therefore guarantees the orchestrator delivers results in a trustworthy form for clinical/research contexts.
 
 ## Why approval is or is not required
-- approval required. 다음 세 가지 이유 때문에 사용자 승인 후 실행한다.
-  - GPU 기반 3D 딥러닝 inference를 수행하기 때문에 자원 소모가 크다. `brain_tumor_seg`는 224x224x144 ROI sliding window를 사용하므로 단일 실행에도 GPU 메모리와 시간이 상당히 든다.
-  - segmentation 마스크는 이후 볼륨 측정이나 병변 정량화처럼 임상적 판단으로 이어질 수 있는 결과물이다. 그렇기 때문에 사용자가 실행 대상과 파라미터를 한 번 더 확인한 뒤 수행하는 것이 안전하다.
-  - NIfTI 파일 메타데이터만으로는 MRI인지 CT인지 확정할 수 없다. 잘못된 조합(예: CT 볼륨에 `@seg_brain`)으로 실행될 경우 무의미한 결과가 나올 수 있으므로, 승인 단계에서 입력과 도구가 맞는지 다시 점검한다.
+- approval required. Execution after explicit user approval is required for the following three reasons.
+  - The tool performs GPU-based 3D deep-learning inference and is resource-intensive. `brain_tumor_seg` uses a 224x224x144 ROI sliding window, so even a single run consumes a substantial amount of GPU memory and time.
+  - Segmentation masks can feed into downstream clinical decisions such as volume measurement or lesion quantification. For that reason, it is safer to have the user confirm the target and parameters once more before execution.
+  - NIfTI file metadata alone cannot definitively distinguish MRI from CT. An incorrect combination (for example, running `@seg_brain` on a CT volume) can produce meaningless results, so the approval step provides an additional check that the input and tool match.
 
 ## What educational value it adds
-- 동일한 ChatClinic 인터페이스 안에서 3D MRI modality와 SegResNet 아키텍처가 어떤 타겟에 어떻게 사용되는지를 확인할 수 있다.
-- tool이 요구하는 입력 조건을 통해 의료 영상의 기초 지식을 학습한다.
-  - BraTS 4채널(T1, T1ce, T2, FLAIR) MRI 구성
-  - BraTS label 체계(ET/TC/WT, 원본 label 1/2/4 → 3-class 변환)
-- `tool.json` + `logic.py` + skill patch로 구성되는 ChatClinic plugin 패턴을 실습할 수 있어, 향후 원하는 tool을 추가할 때 그대로 템플릿으로 사용 가능하다.
-- segmentation 결과가 `segmentation_result` slot을 통해 Studio로 렌더링되는 흐름을 경험함으로써, 업로드 → tool 호출 → 결과 해석으로 이어지는 end-to-end 의료 AI 워크플로우를 이해할 수 있다.
+- Within the same ChatClinic interface, learners can see how the 3D MRI modality and the SegResNet architecture are applied to a specific target.
+- Meeting this tool's input requirements naturally exposes the learner to foundational medical-imaging concepts.
+  - Composition of BraTS 4-channel MRI (T1, T1ce, T2, FLAIR)
+  - BraTS label scheme (ET/TC/WT, original labels 1/2/4 → 3-class conversion)
+- The ChatClinic plugin pattern of `tool.json` + `logic.py` + skill patch can be practiced directly, making it reusable as a template when adding new tools later.
+- Experiencing how segmentation results flow through the `segmentation_result` slot and render in Studio helps the learner understand the end-to-end medical-AI workflow from upload → tool invocation → result interpretation.
